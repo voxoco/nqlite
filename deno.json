@@ -1,0 +1,9 @@
+{
+  "tasks": {
+    "run": "deno cache --unstable main.ts && deno run -A --unstable main.ts",
+    "build_linux": "deno compile --target=x86_64-unknown-linux-gnu --output nqlite_linux -A --unstable main.ts",
+    "build_mac": "deno compile --target=aarch64-apple-darwin --output nqlite_mac -A --unstable main.ts",
+    "build_windows": "deno compile --target=x86_64-pc-windows-msvc --output nqlite_windows -A --unstable main.ts"
+  },
+  "importMap": "./import_map.json"
+}

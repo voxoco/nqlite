@@ -1,0 +1,98 @@
+name: ci
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - 'main'
+    tags:
+      - 'v*'
+  pull_request:
+    branches:
+      - 'main'
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v3
+      
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v2
+      
+      - name: Docker meta
+        id: meta
+        uses: docker/metadata-action@v4
+        with:
+          images: voxo/nqlite
+          tags: |
+            type=schedule
+            type=ref,event=branch
+            type=ref,event=pr
+            type=semver,pattern={{version}}
+            type=semver,pattern={{major}}.{{minor}}
+            type=semver,pattern={{major}}
+      
+      - name: Login to GitHub Container Registry
+        uses: docker/login-action@v2
+        with:
+          username: ${{ github.actor }}
+          password: ${{ secrets.DOCKER_PAT }}
+      
+      - name: Build and push
+        uses: docker/build-push-action@v3
+        with:
+          context: .
+          push: true
+          labels: ${{ steps.meta.outputs.labels }}
+          tags: ${{ steps.meta.outputs.tags }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+      - uses: denoland/setup-deno@v1.1.1
+        with:
+          deno-version: v1.x
+      - name: Generate the artifacts
+        if: startsWith(github.ref, 'refs/tags/v')
+        run: |
+          VERSION=${GITHUB_REF_NAME#v}
+          deno compile --target=x86_64-unknown-linux-gnu --output nqlite-$VERSION-linux-amd64/nqlite -A --unstable main.ts
+          deno compile --target=x86_64-apple-darwin --output nqlite-$VERSION-darwin-amd64/nqlite -A --unstable main.ts
+          deno compile --target=aarch64-apple-darwin --output nqlite-$VERSION-darwin-arm64/nqlite -A --unstable main.ts
+          mkdir bin
+          tar -czf bin/nqlite-$VERSION-linux-amd64.tar.gz nqlite-$VERSION-linux-amd64/nqlite
+          tar -czf bin/nqlite-$VERSION-darwin-amd64.tar.gz nqlite-$VERSION-darwin-amd64/nqlite
+          tar -czf bin/nqlite-$VERSION-darwin-arm64.tar.gz nqlite-$VERSION-darwin-arm64/nqlite
+
+      - name: Upload the artifacts
+        uses: svenstaro/upload-release-action@v2
+        if: startsWith(github.ref, 'refs/tags/v')
+        with:
+          repo_token: ${{ secrets.CR_PAT }}
+          file: bin/*
+          tag: ${{ github.ref_name }}
+          overwrite: true
+          file_glob: true
+      - name: Release to homebrew
+        uses: Justintime50/homebrew-releaser@v1
+        if: startsWith(github.ref, 'refs/tags/v')
+        with:
+          homebrew_owner: ${{ github.repository_owner }}
+          homebrew_tap: homebrew-apps
+          formula_folder: formula
+          github_token: ${{ secrets.CR_PAT }}
+          commit_owner: homebrew-releaser
+          commit_email: homebrew-releaser@example.com
+
+          # Custom install command for your formula.
+          # Required - string.
+          install: 'bin.install "nqlite"'
+          target_darwin_amd64: true
+          target_darwin_arm64: true
+          target_linux_amd64: true
+          target_linux_arm64: false
+          update_readme_table: true
+          skip_commit: false
+          debug: true
