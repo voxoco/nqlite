@@ -79,14 +79,14 @@ function uId(dataDir: string): string {
   // Check if uid file exists. If not generate one with the time origin as the uid
   const name = `${dataDir}/uid`;
 
-  if (Deno.statSync(name).isFile) {
-    const uid = Deno.readTextFileSync(name);
+  try {
+    return Deno.readTextFileSync(name);
+  } catch (e) {
+    console.log(e);
+    const uid = String(performance.timeOrigin);
+    Deno.writeTextFileSync(name, uid);
     return uid;
   }
-
-  const uid = String(performance.timeOrigin);
-  Deno.writeTextFileSync(name, uid);
-  return uid;
 }
 
 export async function restore(os: ObjectStore, db: string): Promise<void> {
