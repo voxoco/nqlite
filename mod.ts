@@ -104,6 +104,18 @@ export class Nqlite {
       return res;
     }
 
+    // Check for transaction
+    if (s.txItems.length) {
+      let changes = 0;
+      for (const p of s.txItems) {
+        this.db.exec(p);
+        changes += this.db.changes;
+      }
+      res.results[0].rows_affected = changes;
+      res.time = performance.now() - s.t;
+      return res;
+    }
+
     const stmt = this.db.prepare(s.query);
 
     // If this is a read statement set the last last_insert_id and rows_affected

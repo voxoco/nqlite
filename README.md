@@ -99,10 +99,11 @@ $ deno run -A --unstable https://deno.land/x/nqlite/main.ts --wshost=wss://FQDN 
 ## Coming Soon
 
 - [ ] Prometheus exporter
-- [ ] Transactions
+- [X] Transactions
 - [ ] API Authentication
 - [ ] InsertId and affectedRows in response
 - [ ] Work with Deno Deploy (memory db)
+- [ ] Handle queries via NATS request/reply
 - [ ] Ideas welcome!
 
 ## How it works
@@ -284,7 +285,16 @@ curl -XPOST 'localhost:4001/db/query' -H "Content-Type: application/json" -d '[
 
 ## Transactions
 
-Transactions are not yet supported. (Coming soon)
+A form of transactions are supported where nqlite accepts an array of queries. Only **Write** queries are supported. You can use the same `/db/query` as usual.
+
+### Write
+
+```bash
+curl -XPOST 'localhost:4001/db/query' -H "Content-Type: application/json" -d "[
+    \"INSERT INTO foo(name) VALUES('fiona')\",
+    \"INSERT INTO foo(name) VALUES('sinead')\"
+]"
+```
 
 ## Error handling
 

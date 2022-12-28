@@ -41,6 +41,7 @@ export type ParseRes = {
   t: number;
   data: JSON;
   isRead: boolean;
+  txItems: string[];
 };
 
 export type Res = {

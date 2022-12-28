@@ -14,6 +14,12 @@ const flags = parse(Deno.args, {
   },
 });
 
+// Handle SIGINT
+Deno.addSignalListener("SIGINT", () => {
+  console.log("About to die!");
+  Deno.exit();
+});
+
 const showHelp = () => {
   console.log("Usage: ./nqlite [options]");
   console.log("  --help, -h: Show this help");
