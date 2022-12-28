@@ -9,6 +9,7 @@ export function parse(data: JSON, t: number): ParseRes {
     t,
     data,
     isRead: false,
+    txItems: [],
   };
 
   // If this is not an array, return error
@@ -20,6 +21,28 @@ export function parse(data: JSON, t: number): ParseRes {
 
   // If this is not an array of arrays, just a simple query
   if (!Array.isArray(data[0])) {
+    // Check if this is a transaction (more than 1 item in the array)
+    if (data.length > 1) {
+      // Make sure it's not a read query
+      if (isReadTx(data)) {
+        res.error = "Invalid Transaction. SELECT query in transaction";
+        console.log(data);
+        return res;
+      }
+
+      // Make sure data is an array of strings
+      for (const d of data) {
+        if (typeof d !== "string") {
+          res.error = "Invalid Transaction. Not an array of strings";
+          console.log(d);
+          return res;
+        }
+      }
+
+      res.txItems = data;
+      return res;
+    }
+    
     res.query = data[0] as string;
     res.isRead = isReadQuery(res.query);
     return res;
@@ -49,6 +72,11 @@ export function parse(data: JSON, t: number): ParseRes {
   res.isRead = isReadQuery(res.query);
   res.params = item;
   return res;
+}
+
+function isReadTx(data: string[]): boolean {
+  const found = data.find((q) => isReadQuery(q));
+  return found ? true : false;
 }
 
 function isReadQuery(q: string): boolean {
