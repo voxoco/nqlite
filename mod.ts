@@ -187,9 +187,7 @@ export class Nqlite {
         this.db.exec("VACUUM");
 
         const e = await this.kv.get("snapshot");
-        const lastSnapSeq = this.sc.decode(e!.value)
-          ? Number(this.sc.decode(e!.value))
-          : 0;
+        const lastSnapSeq = e ? Number(this.sc.decode(e.value)) : 0;
         console.log(`Last snapshot sequence: ${lastSnapSeq}`);
 
         // Check if we need to snapshot
