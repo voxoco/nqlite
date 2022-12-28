@@ -62,6 +62,7 @@ $ nqlite --wshost=wss://FQDN --creds=./nats.creds
 --wshost=wss://... - NATS Websocket URL - required
 --creds=./nats.creds - NATS creds file - optional
 --token=secret - NATS auth token - optional
+--data-dir=/nqlite-data - Data directory - optional
 --h - Help
 
 # Pass either creds or token but not both

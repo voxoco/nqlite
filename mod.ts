@@ -18,8 +18,8 @@ import { NatsInit, NatsRes, ParseRes, Res } from "./types.ts";
 import { parse } from "./parse.ts";
 
 export class Nqlite {
-  dataDir: string;
-  dbFile: string;
+  dataDir!: string;
+  dbFile!: string;
   nc!: NatsConnection;
   sc: Codec<string> = StringCodec();
   app: string;
@@ -37,8 +37,6 @@ export class Nqlite {
 
   // Create a constructor
   constructor() {
-    this.dataDir = ".data";
-    this.dbFile = `${this.dataDir}/nqlite.db`;
     this.app = "nqlite";
     this.subject = `${this.app}.push`;
     this.snapInterval = 2;
@@ -47,8 +45,10 @@ export class Nqlite {
   }
 
   // Init function to connect to NATS
-  async init(url: string, creds: string, token: string): Promise<void> {
-    // Make sure .data directory exists
+  async init(url: string, creds: string, token: string, dataDir: string): Promise<void> {
+    // Make sure directory exists
+    this.dataDir = dataDir;
+    this.dbFile = `${this.dataDir}/nqlite.db`;
     await Deno.mkdir(this.dataDir, { recursive: true });
 
     // NATS connection options

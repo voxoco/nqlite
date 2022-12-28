@@ -2,7 +2,7 @@ import { parse } from "https://deno.land/std@0.168.0/flags/mod.ts";
 
 const flags = parse(Deno.args, {
   boolean: ["help"],
-  string: ["wshost", "creds", "token"],
+  string: ["wshost", "creds", "token", "data-dir"],
   alias: { h: "help" },
   stopEarly: true,
   default: {
@@ -10,6 +10,7 @@ const flags = parse(Deno.args, {
     wshost: "ws://localhost:8080",
     creds: "",
     token: "",
+    "data-dir": ".data",
   },
 });
 
@@ -21,6 +22,7 @@ const showHelp = () => {
   );
   console.log("  --token: NATS authentication token (default: none)");
   console.log("  --creds: NATS credentials file (default: none)");
+  console.log("  --data-dir: Data directory (default: '.data'");
   Deno.exit(0);
 };
 
@@ -45,4 +47,4 @@ import { Nqlite } from "./mod.ts";
 
 // Startup nqlite
 const nqlite = new Nqlite();
-await nqlite.init(flags["wshost"], flags["creds"], flags["token"]);
+await nqlite.init(flags["wshost"], flags["creds"], flags["token"], flags["data-dir"]);
