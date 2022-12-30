@@ -14,7 +14,7 @@ import { serve } from "serve";
 import { Context, Hono } from "hono";
 import { nats, restore, snapshot } from "./util.ts";
 import { Database } from "sqlite3";
-import { NatsInit, NatsRes, ParseRes, Res } from "./types.ts";
+import { NatsInit, NatsRes, Options, ParseRes, Res } from "./types.ts";
 import { parse } from "./parse.ts";
 
 export class Nqlite {
@@ -45,7 +45,8 @@ export class Nqlite {
   }
 
   // Init function to connect to NATS
-  async init(url: string, creds: string, token: string, dataDir: string): Promise<void> {
+  async init(opts: Options): Promise<void> {
+    const { url, creds, token, dataDir } = opts;
     // Make sure directory exists
     this.dataDir = dataDir;
     this.dbFile = `${this.dataDir}/nqlite.db`;
@@ -104,14 +105,21 @@ export class Nqlite {
       return res;
     }
 
-    // Check for transaction
-    if (s.txItems.length) {
-      let changes = 0;
-      for (const p of s.txItems) {
-        this.db.exec(p);
-        changes += this.db.changes;
+    // Check for simple bulk query
+    if (s.bulkItems.length && s.simple) {
+      for (const p of s.bulkItems) this.db.exec(p);
+      res.time = performance.now() - s.t;
+      res.results[0].last_insert_id = this.db.lastInsertRowId;
+      return res;
+    }
+
+    // Check for bulk paramaterized/named query
+    if (s.bulkParams.length) {
+      for (const p of s.bulkParams) {
+        const stmt = this.db.prepare(p.query);
+        stmt.run(...p.params);
       }
-      res.results[0].rows_affected = changes;
+      res.results[0].last_insert_id = this.db.lastInsertRowId;
       res.time = performance.now() - s.t;
       return res;
     }
@@ -128,7 +136,7 @@ export class Nqlite {
     // Must not be a read statement
     res.results[0].rows_affected = s.simple
       ? stmt.all()
-      : stmt.all(...s.params);
+      : stmt.run(...s.params);
     res.results[0].last_insert_id = this.db.lastInsertRowId;
     res.time = performance.now() - s.t;
     return res;
@@ -314,3 +322,5 @@ export class Nqlite {
     serve(api.fetch, { port: 4001 });
   }
 }
+
+export type { Options };

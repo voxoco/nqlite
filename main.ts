@@ -49,8 +49,16 @@ if (flags.creds && flags.token) {
   showHelp();
 }
 
-import { Nqlite } from "./mod.ts";
+import { Nqlite, Options } from "./mod.ts";
 
 // Startup nqlite
 const nqlite = new Nqlite();
-await nqlite.init(flags["wshost"], flags["creds"], flags["token"], flags["data-dir"]);
+
+const opts: Options = {
+  url: flags["wshost"],
+  creds: flags["creds"],
+  token: flags["token"],
+  dataDir: flags["data-dir"],
+};
+
+await nqlite.init(opts);
