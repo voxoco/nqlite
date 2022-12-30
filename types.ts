@@ -41,11 +41,24 @@ export type ParseRes = {
   t: number;
   data: JSON;
   isRead: boolean;
-  txItems: string[];
+  bulkItems: string[];
+  bulkParams: bulkParams[];
 };
+
+type bulkParams = {
+  query: string;
+  params: RestBindParameters;
+}
 
 export type Res = {
   error?: string;
   results: Array<Record<string, unknown>>;
   time: number;
+};
+
+export type Options = {
+  url: string;
+  creds: string;
+  token: string;
+  dataDir: string;
 };

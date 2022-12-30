@@ -99,7 +99,7 @@ $ deno run -A --unstable https://deno.land/x/nqlite/main.ts --wshost=wss://FQDN 
 ## Coming Soon
 
 - [ ] Prometheus exporter
-- [X] Transactions
+- [ ] Transactions
 - [ ] API Authentication
 - [ ] InsertId and affectedRows in response
 - [ ] Work with Deno Deploy (memory db)
@@ -283,18 +283,38 @@ curl -XPOST 'localhost:4001/db/query' -H "Content-Type: application/json" -d '[
 ]'
 ```
 
-## Transactions
-
-A form of transactions are supported where nqlite accepts an array of queries. Only **Write** queries are supported. You can use the same `/db/query` as usual.
+## Bulk Queries
 
 ### Write
 
 ```bash
 curl -XPOST 'localhost:4001/db/query' -H "Content-Type: application/json" -d "[
-    \"INSERT INTO foo(name) VALUES('fiona')\",
-    \"INSERT INTO foo(name) VALUES('sinead')\"
+  \"INSERT INTO foo(name) VALUES('fiona')\",
+  \"INSERT INTO foo(name) VALUES('sinead')\"
 ]"
 ```
+
+### Parameterized Bulk Queries
+
+```bash
+curl -XPOST 'localhost:4001/db/query' -H "Content-Type: application/json" -d '[
+  ["INSERT INTO foo(name) VALUES(?)", "fiona"],
+  ["INSERT INTO foo(name) VALUES(?)", "sinead"]
+]'
+```
+
+## Named Parameter Bulk Queries
+
+```bash
+curl -XPOST 'localhost:4001/db/query' -H "Content-Type: application/json" -d '[
+  ["INSERT INTO foo(name) VALUES(:name)", {"name": "fiona"}],
+  ["INSERT INTO foo(name) VALUES(:name)", {"name": "sinead"}]
+]'
+```
+
+## Transactions
+
+Not implemented yet
 
 ## Error handling
 
