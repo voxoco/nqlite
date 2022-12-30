@@ -48,7 +48,7 @@ export type ParseRes = {
 type bulkParams = {
   query: string;
   params: RestBindParameters;
-}
+};
 
 export type Res = {
   error?: string;

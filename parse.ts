@@ -87,7 +87,7 @@ export function parse(data: JSON, t: number): ParseRes {
         return res;
       }
 
-      res.bulkParams.push({query, params});
+      res.bulkParams.push({ query, params });
     }
 
     return res;
@@ -96,7 +96,7 @@ export function parse(data: JSON, t: number): ParseRes {
   // Must be regular (non bulk) paramarized/named statement
   const paramRes = paramQueryRes(data[0]);
   const { error, query, params, isRead } = paramRes;
-  
+
   // If error in paramarized/named statement, return error
   if (error) {
     res.error = error;
@@ -126,7 +126,7 @@ function paramQueryRes(data: string[]) {
     query: "",
     params: [] as string[],
     isRead: false,
-  }
+  };
 
   // Grab the first item in the array
   const params = Array.from(data);
