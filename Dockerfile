@@ -1,5 +1,7 @@
 FROM denoland/deno:alpine
 
+RUN apk add --no-cache tzdata
+
 EXPOSE 4001
 
 WORKDIR /app
