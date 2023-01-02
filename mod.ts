@@ -77,6 +77,9 @@ export class Nqlite {
 
     // Connect to the database
     this.db = new Database(this.dbFile);
+    this.db.exec("pragma journal_mode = WAL");
+    this.db.exec("pragma synchronous = normal");
+    this.db.exec("pragma temp_store = memory");
 
     const version = this.db.prepare("select sqlite_version()").value<
       [string]
@@ -115,10 +118,7 @@ export class Nqlite {
 
     // Check for bulk paramaterized/named query
     if (s.bulkParams.length) {
-      for (const p of s.bulkParams) {
-        const stmt = this.db.prepare(p.query);
-        stmt.run(...p.params);
-      }
+      for (const p of s.bulkParams) this.db.prepare(p.query).run(...p.params);
       res.results[0].last_insert_id = this.db.lastInsertRowId;
       res.time = performance.now() - s.t;
       return res;
@@ -135,7 +135,7 @@ export class Nqlite {
 
     // Must not be a read statement
     res.results[0].rows_affected = s.simple
-      ? stmt.all()
+      ? stmt.run()
       : stmt.run(...s.params);
     res.results[0].last_insert_id = this.db.lastInsertRowId;
     res.time = performance.now() - s.t;
