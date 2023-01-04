@@ -1,17 +1,16 @@
 import {
   connect,
-  consumerOpts,
-  createInbox,
   credsAuthenticator,
   ObjectStore,
   StreamInfo,
   StringCodec,
 } from "natsws";
+import { Database } from "sqlite3";
 import { NatsConf, NatsInit, NatsRes } from "./types.ts";
 
 // NATS initialization function
 export async function nats(conf: NatsInit): Promise<NatsRes> {
-  const { app, dataDir, creds, token } = conf;
+  const { app, creds, token } = conf;
 
   const natsOpts = { servers: conf.url } as NatsConf;
   if (token) natsOpts.token = token;
@@ -22,10 +21,6 @@ export async function nats(conf: NatsInit): Promise<NatsRes> {
   console.log("Connecting to NATS");
   const nc = await connect(natsOpts);
   console.log("Connected to NATS Server:", nc.getServer());
-
-  // Generate or read the uuid for this instance
-  const uid = uId(dataDir);
-  console.log("Node uid:", uid);
 
   // Create a jetstream manager
   const jsm = await nc.jetstreamManager();
@@ -54,48 +49,52 @@ export async function nats(conf: NatsInit): Promise<NatsRes> {
     }
   }
 
-  console.log(`Messages in the stream: ${stream.state.messages}`);
-
   // Create a jetstream client
   const js = nc.jetstream();
 
-  console.log("Creating kv and object store if they don't exist");
-  const [kv, os] = await Promise.all([js.views.kv(app), js.views.os(app)]);
-
-  // Setup nats push consumer
-  const opts = consumerOpts();
-  opts.durable(uid);
-  opts.manualAck();
-  opts.ackExplicit();
-  opts.maxAckPending(1);
-  opts.deliverTo(createInbox());
+  console.log("Creating object store if it don't exist");
+  const os = await js.views.os(app, { replicas: 3 });
 
   console.log("NATS initialized");
 
-  return { sc, js, kv, os, opts, jsm, lastSeq: stream.state.messages };
+  return { sc, js, os, jsm };
 }
 
-function uId(dataDir: string): string {
-  // Check if uid file exists. If not generate one with the time origin as the uid
-  const name = `${dataDir}/uid`;
-
+export async function bootstrapDataDir(dataDir: string) {
   try {
-    return Deno.readTextFileSync(name);
+    await Deno.mkdir(dataDir, { recursive: true });
   } catch (e) {
-    console.log(e);
-    const uid = String(performance.timeOrigin);
-    Deno.writeTextFileSync(name, uid);
-    return uid;
+    console.log(e.message);
+    // Reset the dataDir
+    await Deno.remove(dataDir, { recursive: true });
+    await Deno.mkdir(dataDir, { recursive: true });
   }
+}
+
+export function dbSetup(file: string): Database {
+  const db = new Database(file);
+
+  db.exec("pragma journal_mode = WAL");
+  db.exec("pragma synchronous = normal");
+  db.exec("pragma temp_store = memory");
+
+  const version = db.prepare("select sqlite_version()").value<[string]>()!;
+
+  console.log(`SQLite version: ${version}`);
+
+  // Create sequence table if it doesn't exist
+  console.log("Creating sequence table if it doesn't exist");
+  db.exec(
+    `CREATE TABLE IF NOT EXISTS _nqlite_ (id INTEGER PRIMARY KEY, seq NOT NULL)`,
+  );
+
+  // Insert the first sequence number if it doesn't exist
+  db.exec(`INSERT OR IGNORE INTO _nqlite_ (id, seq) VALUES (1,0)`);
+
+  return db;
 }
 
 export async function restore(os: ObjectStore, db: string): Promise<void> {
-  // If the file already exists, don't restore
-  if (await Deno.stat(db).catch(() => false)) {
-    console.log("Database already exists");
-    return;
-  }
-
   // See if snapshot exists in object store
   const objEntry = await os.get("snapshot");
 
@@ -144,21 +143,27 @@ function readableStreamFrom(data: Uint8Array): ReadableStream<Uint8Array> {
   });
 }
 
-export async function snapshot(os: ObjectStore, db: string): Promise<boolean> {
+export async function snapshot(
+  os: ObjectStore,
+  db: string,
+  seq: number,
+): Promise<boolean> {
   try {
     // Put the sqlite file in the object store
     const info = await os.put({
       name: "snapshot",
-      description: "Snapshot of nqlite database",
+      description: `${seq}`,
     }, readableStreamFrom(await Deno.readFile(db)));
 
     // Convert bytes to megabytes
     const mb = (info.size / 1024 / 1024).toFixed(2);
 
-    console.log(`Snapshot stored in object store: ${mb}Mb`);
+    console.log(
+      `Snapshot with sequence number ${seq} stored in object store: ${mb}Mb`,
+    );
     return true;
   } catch (e) {
-    console.log(e);
+    console.log("Error during snapshot:", e.message);
     return false;
   }
 }
