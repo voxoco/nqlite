@@ -1,38 +1,33 @@
 import {
   Codec,
-  ConsumerOptsBuilder,
+  consumerOpts,
+  createInbox,
   JetStreamClient,
   JetStreamManager,
   JetStreamSubscription,
-  KV,
-  NatsConnection,
   ObjectStore,
   PubAck,
   StringCodec,
 } from "natsws";
 import { serve } from "serve";
 import { Context, Hono } from "hono";
-import { nats, restore, snapshot } from "./util.ts";
+import { bootstrapDataDir, dbSetup, nats, restore, snapshot } from "./util.ts";
 import { Database } from "sqlite3";
-import { NatsInit, NatsRes, Options, ParseRes, Res } from "./types.ts";
+import { NatsRes, Options, ParseRes, Res } from "./types.ts";
 import { parse } from "./parse.ts";
 
 export class Nqlite {
   dataDir!: string;
   dbFile!: string;
-  nc!: NatsConnection;
   sc: Codec<string> = StringCodec();
   app: string;
   js!: JetStreamClient;
   db!: Database;
   os!: ObjectStore;
-  kv!: KV;
   subject: string;
   sub!: JetStreamSubscription;
-  opts!: ConsumerOptsBuilder;
   snapInterval: number;
   snapThreshold: number;
-  seq: number;
   jsm!: JetStreamManager;
 
   // Create a constructor
@@ -41,50 +36,27 @@ export class Nqlite {
     this.subject = `${this.app}.push`;
     this.snapInterval = 2;
     this.snapThreshold = 1024;
-    this.seq = 0;
   }
 
   // Init function to connect to NATS
   async init(opts: Options): Promise<void> {
     const { url, creds, token, dataDir } = opts;
-    // Make sure directory exists
-    this.dataDir = dataDir;
-    this.dbFile = `${this.dataDir}/nqlite.db`;
-    await Deno.mkdir(this.dataDir, { recursive: true });
 
-    // NATS connection options
-    const conf = {
-      url,
-      app: this.app,
-      dataDir: this.dataDir,
-      creds,
-      token,
-    } as NatsInit;
+    this.dataDir = `${dataDir}/${this.app}`;
+    this.dbFile = `${this.dataDir}/nqlite.db`;
+
+    // Bootstrap the dataDir
+    await bootstrapDataDir(this.dataDir);
 
     // Initialize NATS
-    const res: NatsRes = await nats(conf);
-    ({
-      js: this.js,
-      os: this.os,
-      kv: this.kv,
-      opts: this.opts,
-      jsm: this.jsm,
-      lastSeq: this.seq,
-    } = res);
+    const res: NatsRes = await nats({ url, app: this.app, creds, token });
+    ({ js: this.js, os: this.os, jsm: this.jsm } = res);
 
-    // Restore from snapshot if needed
+    // Restore from snapshot if exists
     await restore(this.os, this.dbFile);
 
-    // Connect to the database
-    this.db = new Database(this.dbFile);
-    this.db.exec("pragma journal_mode = WAL");
-    this.db.exec("pragma synchronous = normal");
-    this.db.exec("pragma temp_store = memory");
-
-    const version = this.db.prepare("select sqlite_version()").value<
-      [string]
-    >()!;
-    console.log(`SQLite version: ${version}`);
+    // Setup to the database
+    this.db = dbSetup(this.dbFile);
 
     // Setup the API
     this.http();
@@ -93,8 +65,26 @@ export class Nqlite {
     this.snapshotPoller();
 
     // Start iterating over the messages in the stream
-    this.sub = await this.js.subscribe(this.subject, this.opts);
-    this.iterator(this.sub);
+    await this.consumer();
+
+    // Handle SIGINT
+    Deno.addSignalListener("SIGINT", async () => {
+      console.log("About to die!. Draining subscription");
+      await this.sub.drain();
+      console.log("Closing the database");
+      this.db.close();
+      Deno.exit();
+    });
+  }
+
+  // Get the latest sequence number
+  getSeq(): number {
+    return this.db.prepare(`SELECT seq FROM _nqlite_`).get()!.seq as number;
+  }
+
+  // Set the latest sequence number
+  setSeq(seq: number): void {
+    this.db.prepare(`UPDATE _nqlite_ SET seq = ? where id = 1`).run(seq);
   }
 
   // Execute a statement
@@ -142,6 +132,21 @@ export class Nqlite {
     return res;
   }
 
+  // Setup ephemeral consumer
+  async consumer(): Promise<void> {
+    // Get the latest sequence number
+    const opts = consumerOpts();
+    opts.manualAck();
+    opts.ackExplicit();
+    opts.maxAckPending(10);
+    opts.deliverTo(createInbox());
+    const seq = this.getSeq() + 1;
+    opts.startSequence(seq);
+    console.log(`Starting consumer at seq: ${seq}`);
+    this.sub = await this.js.subscribe(this.subject, opts);
+    this.iterator(this.sub);
+  }
+
   // Publish a message to NATS
   async publish(s: ParseRes): Promise<Res> {
     const res: Res = { results: [{}], time: 0 };
@@ -167,28 +172,25 @@ export class Nqlite {
   async iterator(sub: JetStreamSubscription) {
     for await (const m of sub) {
       console.log(`Received sequence #: ${m.seq}`);
+      const data = JSON.parse(this.sc.decode(m.data));
 
       try {
-        const res = parse(
-          JSON.parse(this.sc.decode(m.data)),
-          performance.now(),
-        );
+        const res = parse(data, performance.now());
 
         // Handle errors
         if (res.error) {
+          console.log("Parse error:", res.error);
           m.ack();
-          this.seq = m.seq;
           continue;
         }
 
         this.execute(res);
-        m.ack();
-        this.seq = m.seq;
       } catch (e) {
-        console.log(e);
-        m.ack();
-        this.seq = m.seq;
+        console.log("Execute error: ", e.message, "Query: ", data);
       }
+
+      m.ack();
+      this.setSeq(m.seq);
     }
   }
 
@@ -201,54 +203,52 @@ export class Nqlite {
         setTimeout(resolve, this.snapInterval * 60 * 60 * 1000)
       );
 
-      // Get the last snapshot sequence from the kv store
       try {
         // First VACUUM the database to free up space
         this.db.exec("VACUUM");
 
-        const e = await this.kv.get("snapshot");
-        const lastSnapSeq = e ? Number(this.sc.decode(e.value)) : 0;
-        console.log(`Last snapshot sequence: ${lastSnapSeq}`);
+        // Check object store for snapshot
+        const snapInfo = await this.os.info(this.app);
 
         // Check if we need to snapshot
-        if (this.seq - lastSnapSeq < this.snapThreshold) {
+        if (snapInfo) {
+          const processed = this.getSeq() - Number(snapInfo.description);
+          if (processed < this.snapThreshold) {
+            console.log(
+              `Skipping snapshot, threshold not met: ${processed} < ${this.snapThreshold}`,
+            );
+            continue;
+          }
+        }
+
+        if (!snapInfo && this.getSeq() < this.snapThreshold) {
           console.log(
-            `Skipping snapshot, sequence number threshold not met: ${
-              this.seq - lastSnapSeq
-            } < ${this.snapThreshold}`,
+            `Skipping snapshot, threshold not met: ${this.getSeq()} < ${this.snapThreshold}`,
           );
           continue;
         }
 
         // Unsubscribe from the stream so we stop receiving db updates
-        this.sub.unsubscribe();
-        console.log("Unsubscribed from stream");
+        await this.sub.drain();
+        console.log("Drained subscription...");
 
         // Snapshot the database to object store
-        if (!await snapshot(this.os, this.dbFile)) {
-          console.log("Error during snapshot");
-          this.sub = await this.js.subscribe(this.subject, this.opts);
-          this.iterator(this.sub);
-          continue;
+        let seq = this.getSeq();
+        if (await snapshot(this.os, this.dbFile, seq)) {
+          // Purge previos messages from the stream older than seq - snapThreshold
+          seq = seq - this.snapThreshold;
+          await this.jsm.streams.purge(this.app, {
+            filter: this.subject,
+            seq: seq < 0 ? 0 : seq,
+          });
         }
-
-        // Update the kv store with the last snapshot sequence number
-        await this.kv.put("snapshot", this.sc.encode(String(this.seq)));
-        console.log(`Updated snapshot kv sequence to ${this.seq}`);
-
-        // Purge messages from the stream older than this.seq + 1
-        await this.jsm.streams.purge(this.app, {
-          filter: this.subject,
-          seq: this.seq + 1,
-        });
       } catch (e) {
-        console.log("Error during snapshot polling", e);
+        console.log("Error during snapshot polling:", e.message);
       }
 
       // Resubscribe to the stream
-      console.log("Resubscribing to stream");
-      this.sub = await this.js.subscribe(this.subject, this.opts);
-      this.iterator(this.sub);
+      console.log(`Subscribing to stream after snapshot attempt`);
+      await this.consumer();
     }
   }
 

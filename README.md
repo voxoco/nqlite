@@ -20,10 +20,9 @@ at the edge like:
 
 - Simple HTTP API for interacting with SQLite via `db/query`
 - Snapshotting/restore out of the box (using
-  [KV](https://docs.nats.io/using-nats/developer/develop_jetstream/kv) and
   [Object Store](https://docs.nats.io/using-nats/developer/develop_jetstream/object))
 - NATS JetStream for SQL replication and persistence (via
-  [Durable Push Consumer](https://docs.nats.io/running-a-nats-service/nats_admin/jetstream_admin/consumers))
+  [Ephemeral Push Consumer](https://docs.nats.io/using-nats/developer/develop_jetstream/consumers))
 - Lightweight, easy-to-use - just run the binary and pass in the NATS Websocket
   URL
 - Deploy anywhere - Linux, macOS, Windows, ARM, Edge, Kubernetes, Docker, etc.
@@ -41,7 +40,7 @@ it needs is a connection to NATS.
 
 - NATS JetStream with at-least once delivery is a great fit for SQL replication
   and persistence
-- NATS KV and Object Store is a great fit for snapshotting/restore
+- Object Store is a great fit for snapshotting/restore
 - Who doesn't already use NATS for pub/sub?
 - The need for a dead simple edge relational database closer to the application
 - **Database nodes don't need to be aware of each other**
@@ -108,22 +107,24 @@ $ deno run -A --unstable https://deno.land/x/nqlite/main.ts --wshost=wss://FQDN 
 
 ## How it works
 
-nqlite is a Deno application that connects to NATS JetStream. It takes care of
-bootstrapping itself and creating the necessary JetStream streams, consumers,
-kv, and object store. It also takes care of snapshotting and restoring the
-SQLite db.
+nqlite is a Deno application that connects to NATS JetStream. It bootstraps
+itself by creating the necessary JetStream streams, consumers, and object store.
+It also takes care of snapshotting and restoring the SQLite db. When a node
+starts up, it checks the object store for an SQLite snapshot. If it finds one,
+it restores from the snapshot. If not, it creates a new SQLite db. The node then
+subscribes to the JetStream stream at the last sequence number processed by the
+SQLite db. Anytime the node receives a query via the stream, it executes the
+query and updates the `_nqlite_` table with the sequence number. Read requests
+are handled locally. Read more below about snapshotting and purging.
 
 ### Built-in configuration
 
 ```bash
-# Data directory
-./.data
+# Default Data directory
+./.data/nqlite
 
 # SQLite file
-./.data/nqlite.db
-
-# Node UID generated on first run (used for durable consumer)
-./.data/uid
+./.data/nqlite/nqlite.db
 
 # NATS JetStream stream
 nqlite
@@ -131,7 +132,7 @@ nqlite
 # NATS JetStream publish subject
 nqlite.push
 
-# NATS kv and object store bucket
+# NATS object store bucket
 nqlite
 
 # Snapshot interval hours (check how often to snapshot the db)
@@ -145,17 +146,18 @@ nqlite
 
 ### Snapshot and purging
 
-Every `snapInterval` nqlite gets the latest snapshot kv key and compares it with
-the last processed sequence number from JetStream. If the node has processed
-more than `snapThreshold` messages since the kv snapshot sequence, the node
-unsubscribes from the stream and attempts a snapshot.
+Every `snapInterval` nqlite gets the latest snapshot sequence from object store
+description and compares it with the last processed sequence number from
+JetStream. If the node has processed more than `snapThreshold` messages since
+the object store snapshot sequence, the node unsubscribes from the stream and
+attempts a snapshot.
 
 The node backs up the SQLite db to object store and sets the latest processed
-sequence number to the snapshot key in kv and purges all previous messages from
-the stream. The node then resumes the JetStream subscription. The nice thing
-here is that JetStream will continue pushing messages to the interator from
-where it left off (so the node doesn’t miss any db changes and eventually
-catches back up).
+sequence number to the object store `description` and purges all previous
+messages from the stream (older than `snapSequence - snapThreshold`). The node
+then resumes the JetStream subscription. The nice thing here is that JetStream
+will continue pushing messages to the interator from where it left off (so the
+node doesn’t miss any db changes and eventually catches back up).
 
 The other nice thing about this setup is that we can still accept writes on this
 node while the snapshotting is taking place. So the only sacrifice we make here
