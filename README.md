@@ -121,10 +121,10 @@ are handled locally. Read more below about snapshotting and purging.
 
 ```bash
 # Default Data directory
-./.data/nqlite
+./.nqlite-data/nqlite
 
 # SQLite file
-./.data/nqlite/nqlite.db
+./.nqlite-data/nqlite/nqlite.db
 
 # NATS JetStream stream
 nqlite
