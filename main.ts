@@ -10,7 +10,7 @@ const flags = parse(Deno.args, {
     wshost: "ws://localhost:8080",
     creds: "",
     token: "",
-    "data-dir": ".data",
+    "data-dir": ".nqlite-data",
   },
 });
 

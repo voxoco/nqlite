@@ -61,13 +61,18 @@ export async function nats(conf: NatsInit): Promise<NatsRes> {
 }
 
 export async function bootstrapDataDir(dataDir: string) {
+  console.log("Bootstrapping data directory:", dataDir);
+
+  try {
+    await Deno.remove(dataDir, { recursive: true });
+  } catch (e) {
+    console.log(e.message);
+  }
+
   try {
     await Deno.mkdir(dataDir, { recursive: true });
   } catch (e) {
     console.log(e.message);
-    // Reset the dataDir
-    await Deno.remove(dataDir, { recursive: true });
-    await Deno.mkdir(dataDir, { recursive: true });
   }
 }
 
@@ -96,20 +101,22 @@ export function dbSetup(file: string): Database {
 
 export async function restore(os: ObjectStore, db: string): Promise<void> {
   // See if snapshot exists in object store
-  const objEntry = await os.get("snapshot");
+  const o = await os.get("snapshot");
 
-  if (!objEntry) {
+  if (!o) {
     console.log("No snapshot object to restore");
     return;
   }
 
-  console.log("Restoring from snapshot...");
+  console.log(
+    `Restoring from snapshot with seq ${o.info.description} taken: ${o.info.mtime}`,
+  );
 
   // Get the object
-  await fromReadableStream(objEntry.data, db);
+  await fromReadableStream(o.data, db);
 
   // Convert bytes to megabytes
-  const mb = (objEntry.info.size / 1024 / 1024).toFixed(2);
+  const mb = (o.info.size / 1024 / 1024).toFixed(2);
 
   console.log(`Restored from snapshot: ${mb}Mb`);
 }

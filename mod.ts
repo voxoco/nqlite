@@ -69,10 +69,12 @@ export class Nqlite {
 
     // Handle SIGINT
     Deno.addSignalListener("SIGINT", async () => {
-      console.log("About to die!. Draining subscription");
+      console.log("About to die! Draining subscription...");
       await this.sub.drain();
       console.log("Closing the database");
       this.db.close();
+      console.log("Removing the data directory");
+      await Deno.remove(this.dataDir, { recursive: true });
       Deno.exit();
     });
   }
@@ -140,11 +142,19 @@ export class Nqlite {
     opts.ackExplicit();
     opts.maxAckPending(10);
     opts.deliverTo(createInbox());
+
     const seq = this.getSeq() + 1;
     opts.startSequence(seq);
-    console.log(`Starting consumer at seq: ${seq}`);
+
+    // Get the latest sequence number in the stream
+    const s = await this.jsm.streams.info(this.app);
+
+    console.log("Messages in the stream  ->>", s.state.messages);
+    console.log("Starting sequence       ->>", seq);
+    console.log("Last sequence in stream ->>", s.state.last_seq);
+
     this.sub = await this.js.subscribe(this.subject, opts);
-    this.iterator(this.sub);
+    this.iterator(this.sub, s.state.last_seq);
   }
 
   // Publish a message to NATS
@@ -169,9 +179,8 @@ export class Nqlite {
   }
 
   // Handle NATS push consumer messages
-  async iterator(sub: JetStreamSubscription) {
+  async iterator(sub: JetStreamSubscription, lastSeq?: number) {
     for await (const m of sub) {
-      console.log(`Received sequence #: ${m.seq}`);
       const data = JSON.parse(this.sc.decode(m.data));
 
       try {
@@ -191,6 +200,13 @@ export class Nqlite {
 
       m.ack();
       this.setSeq(m.seq);
+
+      // Check for last sequence
+      if (lastSeq) {
+        if (m.seq === lastSeq) {
+          console.log("Caught up to last msg   ->>", lastSeq);
+        }
+      }
     }
   }
 
