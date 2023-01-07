@@ -4,22 +4,29 @@ import {
   ObjectStore,
   StreamInfo,
   StringCodec,
-} from "natsws";
+} from "nats";
+import { connect as wsConnect } from "natsws";
 import { Database } from "sqlite3";
 import { NatsConf, NatsInit, NatsRes } from "./types.ts";
 
 // NATS initialization function
-export async function nats(conf: NatsInit): Promise<NatsRes> {
-  const { app, creds, token } = conf;
+export async function setupNats(conf: NatsInit): Promise<NatsRes> {
+  const { app, creds, token, url } = conf;
 
-  const natsOpts = { servers: conf.url } as NatsConf;
+  const natsOpts: NatsConf = {
+    servers: url,
+    maxReconnectAttempts: -1,
+    waitOnFirstConnect: true,
+  };
   if (token) natsOpts.token = token;
   if (creds) {
     natsOpts.authenticator = credsAuthenticator(Deno.readFileSync(creds));
   }
 
   console.log("Connecting to NATS");
-  const nc = await connect(natsOpts);
+  const nc = url.startsWith("ws")
+    ? await wsConnect(natsOpts)
+    : await connect(natsOpts);
   console.log("Connected to NATS Server:", nc.getServer());
 
   // Create a jetstream manager
@@ -53,7 +60,7 @@ export async function nats(conf: NatsInit): Promise<NatsRes> {
   const js = nc.jetstream();
 
   console.log("Creating object store if it don't exist");
-  const os = await js.views.os(app, { replicas: 3 });
+  const os = await js.views.os(app);
 
   console.log("NATS initialized");
 
@@ -76,10 +83,12 @@ export async function bootstrapDataDir(dataDir: string) {
   }
 }
 
-export function dbSetup(file: string): Database {
-  const db = new Database(file);
+export function setupDb(file: string): Database {
+  const db = new Database(file, { unsafeConcurrency: true });
 
-  db.exec("pragma journal_mode = WAL");
+  db.exec("pragma locking_mode = exclusive");
+  db.exec("pragma auto_vacuum = none");
+  db.exec("pragma journal_mode = wal");
   db.exec("pragma synchronous = normal");
   db.exec("pragma temp_store = memory");
 
@@ -155,12 +164,20 @@ export async function snapshot(
   db: string,
   seq: number,
 ): Promise<boolean> {
+  // Make a copy of the sqlite file
+  try {
+    await Deno.copyFile(db, `${db}.bak`);
+  } catch (e) {
+    console.log("Error during snapshot copy file:", e.message);
+    return false;
+  }
+
   try {
     // Put the sqlite file in the object store
     const info = await os.put({
       name: "snapshot",
       description: `${seq}`,
-    }, readableStreamFrom(await Deno.readFile(db)));
+    }, readableStreamFrom(await Deno.readFile(`${db}.bak`)));
 
     // Convert bytes to megabytes
     const mb = (info.size / 1024 / 1024).toFixed(2);
@@ -173,4 +190,54 @@ export async function snapshot(
     console.log("Error during snapshot:", e.message);
     return false;
   }
+}
+
+export async function snapshotCheck(
+  os: ObjectStore,
+  seq: number,
+  threshold: number,
+): Promise<boolean> {
+  console.log(
+    `Checking if we need to snapshot (seq: ${seq}, threshold: ${threshold})`,
+  );
+
+  try {
+    const snapInfo = await os.info("snapshot");
+
+    if (!snapInfo) console.log("No snapshot found in object store");
+
+    // Check if we need to snapshot
+    if (snapInfo) {
+      const processed = seq - Number(snapInfo.description);
+      console.log("Messages processed since last snapshot ->>", processed);
+      if (processed < threshold) {
+        console.log(
+          `Skipping snapshot, threshold not met: ${processed} < ${threshold}`,
+        );
+        return false;
+      }
+
+      // Check if another is in progress or created in the last minute
+      const now = new Date().getTime();
+      const last = new Date(snapInfo.mtime).getTime();
+      if (now - last < 60 * 1000) {
+        const diff = Math.floor((now - last) / 1000);
+        console.log(`Skipping snapshot, latest snapshot ${diff} seconds ago`);
+        return false;
+      }
+    }
+
+    // Check if no snapshot exists and we are below the threshold
+    if (!snapInfo && seq < threshold) {
+      console.log(
+        `Skipping snapshot, threshold not met: ${seq} < ${threshold}`,
+      );
+      return false;
+    }
+  } catch (e) {
+    console.log("Error during snapshot check:", e.message);
+    return false;
+  }
+
+  return true;
 }
