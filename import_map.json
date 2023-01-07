@@ -1,6 +1,6 @@
 {
   "imports": {
-    "sqlite3": "https://deno.land/x/sqlite3@0.7.2/mod.ts",
+    "sqlite3": "https://deno.land/x/sqlite3@0.6.1/mod.ts",
     "natsws": "https://deno.land/x/natsws@v1.11.1/src/mod.ts",
     "nats": "https://deno.land/x/nats@v1.10.2/src/mod.ts",
     "serve": "https://deno.land/std@0.170.0/http/server.ts",

@@ -84,7 +84,7 @@ export async function bootstrapDataDir(dataDir: string) {
 }
 
 export function setupDb(file: string): Database {
-  const db = new Database(file, { unsafeConcurrency: true });
+  const db = new Database(file);
 
   db.exec("pragma locking_mode = exclusive");
   db.exec("pragma auto_vacuum = none");
