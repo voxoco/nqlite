@@ -4,7 +4,7 @@ import {
   JetStreamClient,
   JetStreamManager,
   ObjectStore,
-} from "natsws";
+} from "nats";
 import { RestBindParameters } from "sqlite3";
 
 export type NatsInit = {
@@ -18,6 +18,8 @@ export type NatsConf = {
   servers: string;
   authenticator?: Authenticator;
   token?: string;
+  maxReconnectAttempts?: number;
+  waitOnFirstConnect?: boolean;
 };
 
 export type NatsRes = {

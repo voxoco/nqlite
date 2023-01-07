@@ -58,13 +58,16 @@ $ nqlite --wshost=wss://FQDN --creds=./nats.creds
 ### Command line options
 
 ```bash
---wshost=wss://... - NATS Websocket URL - required
---creds=./nats.creds - NATS creds file - optional
---token=secret - NATS auth token - optional
---data-dir=/nqlite-data - Data directory - optional
---h - Help
+nqlite [options]
+    --nats-host=wss://... # NATS NATS host e.g 'nats://localhost:4222' || 'ws://localhost:8080' (required)
+  
+    --creds=./nats.creds # NATS creds file - required if --token not provided
+  
+    --token=secret # NATS auth token - required if --creds not provided
 
-# Pass either creds or token but not both
+    --data-dir=/nqlite-data # Data directory - optional (default: ./nqlite-data)
+  
+    --h - Help
 ```
 
 ### Docker

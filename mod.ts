@@ -8,10 +8,17 @@ import {
   ObjectStore,
   PubAck,
   StringCodec,
-} from "natsws";
+} from "nats";
 import { serve } from "serve";
 import { Context, Hono } from "hono";
-import { bootstrapDataDir, dbSetup, nats, restore, snapshot } from "./util.ts";
+import {
+  bootstrapDataDir,
+  restore,
+  setupDb,
+  setupNats,
+  snapshot,
+  snapshotCheck,
+} from "./util.ts";
 import { Database } from "sqlite3";
 import { NatsRes, Options, ParseRes, Res } from "./types.ts";
 import { parse } from "./parse.ts";
@@ -29,6 +36,7 @@ export class Nqlite {
   snapInterval: number;
   snapThreshold: number;
   jsm!: JetStreamManager;
+  inSnapShot: boolean;
 
   // Create a constructor
   constructor() {
@@ -36,6 +44,7 @@ export class Nqlite {
     this.subject = `${this.app}.push`;
     this.snapInterval = 2;
     this.snapThreshold = 1024;
+    this.inSnapShot = false;
   }
 
   // Init function to connect to NATS
@@ -49,14 +58,14 @@ export class Nqlite {
     await bootstrapDataDir(this.dataDir);
 
     // Initialize NATS
-    const res: NatsRes = await nats({ url, app: this.app, creds, token });
+    const res: NatsRes = await setupNats({ url, app: this.app, creds, token });
     ({ js: this.js, os: this.os, jsm: this.jsm } = res);
 
     // Restore from snapshot if exists
     await restore(this.os, this.dbFile);
 
     // Setup to the database
-    this.db = dbSetup(this.dbFile);
+    this.db = setupDb(this.dbFile);
 
     // Setup the API
     this.http();
@@ -69,19 +78,27 @@ export class Nqlite {
 
     // Handle SIGINT
     Deno.addSignalListener("SIGINT", async () => {
+      // Check if inSnapShot is true
+      if (this.inSnapShot) {
+        console.log("SIGINT received while in snapshot. Waiting 10 seconds...");
+        await new Promise((resolve) => setTimeout(resolve, 10000));
+      }
+
       console.log("About to die! Draining subscription...");
       await this.sub.drain();
+      await this.sub.destroy();
       console.log("Closing the database");
       this.db.close();
-      console.log("Removing the data directory");
-      await Deno.remove(this.dataDir, { recursive: true });
       Deno.exit();
     });
   }
 
   // Get the latest sequence number
   getSeq(): number {
-    return this.db.prepare(`SELECT seq FROM _nqlite_`).get()!.seq as number;
+    const stmt = this.db.prepare(`SELECT seq FROM _nqlite_ where id = 1`);
+    const seq = stmt.get()!.seq;
+    stmt.finalize();
+    return seq as number;
   }
 
   // Set the latest sequence number
@@ -102,7 +119,7 @@ export class Nqlite {
 
     // Check for simple bulk query
     if (s.bulkItems.length && s.simple) {
-      for (const p of s.bulkItems) this.db.exec(p);
+      for (const p of s.bulkItems) this.db.prepare(p).run();
       res.time = performance.now() - s.t;
       res.results[0].last_insert_id = this.db.lastInsertRowId;
       return res;
@@ -122,6 +139,7 @@ export class Nqlite {
     if (s.isRead) {
       res.results[0].rows = s.simple ? stmt.all() : stmt.all(...s.params);
       res.time = performance.now() - s.t;
+      stmt.finalize();
       return res;
     }
 
@@ -137,19 +155,14 @@ export class Nqlite {
   // Setup ephemeral consumer
   async consumer(): Promise<void> {
     // Get the latest sequence number
-    const opts = consumerOpts();
-    opts.manualAck();
-    opts.ackExplicit();
-    opts.maxAckPending(10);
-    opts.deliverTo(createInbox());
-
     const seq = this.getSeq() + 1;
-    opts.startSequence(seq);
+
+    const opts = consumerOpts().manualAck().ackExplicit().maxAckPending(10)
+      .deliverTo(createInbox()).startSequence(seq).idleHeartbeat(500);
 
     // Get the latest sequence number in the stream
     const s = await this.jsm.streams.info(this.app);
 
-    console.log("Messages in the stream  ->>", s.state.messages);
     console.log("Starting sequence       ->>", seq);
     console.log("Last sequence in stream ->>", s.state.last_seq);
 
@@ -180,33 +193,37 @@ export class Nqlite {
 
   // Handle NATS push consumer messages
   async iterator(sub: JetStreamSubscription, lastSeq?: number) {
-    for await (const m of sub) {
-      const data = JSON.parse(this.sc.decode(m.data));
+    try {
+      for await (const m of sub) {
+        const data = JSON.parse(this.sc.decode(m.data));
 
-      try {
-        const res = parse(data, performance.now());
+        try {
+          const res = parse(data, performance.now());
 
-        // Handle errors
-        if (res.error) {
-          console.log("Parse error:", res.error);
-          m.ack();
-          continue;
+          // Handle errors
+          if (res.error) {
+            console.log("Parse error:", res.error);
+            m.ack();
+            this.setSeq(m.seq);
+            continue;
+          }
+
+          this.execute(res);
+        } catch (e) {
+          console.log("Execute error: ", e.message, "Query: ", data);
         }
 
-        this.execute(res);
-      } catch (e) {
-        console.log("Execute error: ", e.message, "Query: ", data);
-      }
+        m.ack();
+        this.setSeq(m.seq);
 
-      m.ack();
-      this.setSeq(m.seq);
-
-      // Check for last sequence
-      if (lastSeq) {
-        if (m.seq === lastSeq) {
+        // Check for last sequence
+        if (lastSeq && m.seq === lastSeq) {
           console.log("Caught up to last msg   ->>", lastSeq);
         }
       }
+    } catch (e) {
+      console.log("Iterator error: ", e.message);
+      await this.consumer();
     }
   }
 
@@ -214,39 +231,34 @@ export class Nqlite {
   async snapshotPoller() {
     console.log("Starting snapshot poller");
     while (true) {
+      this.inSnapShot = false;
       // Wait for the interval to pass
       await new Promise((resolve) =>
         setTimeout(resolve, this.snapInterval * 60 * 60 * 1000)
       );
 
+      this.inSnapShot = true;
+
       try {
-        // First VACUUM the database to free up space
+        // Unsubscribe from the stream so we stop receiving db updates
+        console.log("Drained subscription...");
+        await this.sub.drain();
+        await this.sub.destroy();
+
+        // VACUUM the database to free up space
+        console.log("VACUUM...");
         this.db.exec("VACUUM");
 
-        // Check object store for snapshot
-        const snapInfo = await this.os.info(this.app);
-
-        // Check if we need to snapshot
-        if (snapInfo) {
-          const processed = this.getSeq() - Number(snapInfo.description);
-          if (processed < this.snapThreshold) {
-            console.log(
-              `Skipping snapshot, threshold not met: ${processed} < ${this.snapThreshold}`,
-            );
-            continue;
-          }
-        }
-
-        if (!snapInfo && this.getSeq() < this.snapThreshold) {
-          console.log(
-            `Skipping snapshot, threshold not met: ${this.getSeq()} < ${this.snapThreshold}`,
-          );
+        // Check if we should run a snapshot
+        const run = await snapshotCheck(
+          this.os,
+          this.getSeq(),
+          this.snapThreshold,
+        );
+        if (!run) {
+          await this.consumer();
           continue;
         }
-
-        // Unsubscribe from the stream so we stop receiving db updates
-        await this.sub.drain();
-        console.log("Drained subscription...");
 
         // Snapshot the database to object store
         let seq = this.getSeq();
@@ -292,11 +304,7 @@ export class Nqlite {
         const data = parse(JSON.parse(r), perf);
         return c.json(this.execute(data));
       } catch (e) {
-        if (e instanceof Error) {
-          res.results[0].error = e.message;
-          return c.json(res, 400);
-        }
-        res.results[0].error = "Invalid Query";
+        res.results[0].error = e.message;
         return c.json(res, 400);
       }
     });
@@ -325,11 +333,7 @@ export class Nqlite {
           ? c.json(this.execute(data))
           : c.json(await this.publish(data));
       } catch (e) {
-        if (e instanceof Error) {
-          res.results[0].error = e.message;
-          return c.json(res, 400);
-        }
-        res.results[0].error = "Invalid Query";
+        res.results[0].error = e.message;
         return c.json(res, 400);
       }
     });
