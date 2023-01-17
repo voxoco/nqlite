@@ -3,6 +3,7 @@ import {
   Codec,
   JetStreamClient,
   JetStreamManager,
+  NatsConnection,
   ObjectStore,
 } from "nats";
 import { RestBindParameters } from "sqlite3";
@@ -19,10 +20,10 @@ export type NatsConf = {
   authenticator?: Authenticator;
   token?: string;
   maxReconnectAttempts?: number;
-  waitOnFirstConnect?: boolean;
 };
 
 export type NatsRes = {
+  nc: NatsConnection;
   sc: Codec<string>;
   js: JetStreamClient;
   os: ObjectStore;

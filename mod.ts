@@ -5,6 +5,7 @@ import {
   JetStreamClient,
   JetStreamManager,
   JetStreamSubscription,
+  NatsConnection,
   ObjectStore,
   PubAck,
   StringCodec,
@@ -16,6 +17,7 @@ import {
   restore,
   setupDb,
   setupNats,
+  sigHandler,
   snapshot,
   snapshotCheck,
 } from "./util.ts";
@@ -28,6 +30,7 @@ export class Nqlite {
   dbFile!: string;
   sc: Codec<string> = StringCodec();
   app: string;
+  nc!: NatsConnection;
   js!: JetStreamClient;
   db!: Database;
   os!: ObjectStore;
@@ -59,7 +62,7 @@ export class Nqlite {
 
     // Initialize NATS
     const res: NatsRes = await setupNats({ url, app: this.app, creds, token });
-    ({ js: this.js, os: this.os, jsm: this.jsm } = res);
+    ({ nc: this.nc, js: this.js, os: this.os, jsm: this.jsm } = res);
 
     // Restore from snapshot if exists
     await restore(this.os, this.dbFile);
@@ -76,21 +79,14 @@ export class Nqlite {
     // Start iterating over the messages in the stream
     await this.consumer();
 
-    // Handle SIGINT
-    Deno.addSignalListener("SIGINT", async () => {
-      // Check if inSnapShot is true
-      if (this.inSnapShot) {
-        console.log("SIGINT received while in snapshot. Waiting 10 seconds...");
-        await new Promise((resolve) => setTimeout(resolve, 10000));
-      }
+    // NATS Reconnect listener
+    this.ncListener();
 
-      console.log("About to die! Draining subscription...");
-      await this.sub.drain();
-      await this.sub.destroy();
-      console.log("Closing the database");
-      this.db.close();
-      Deno.exit();
-    });
+    // Handle SIGINT
+    Deno.addSignalListener(
+      "SIGINT",
+      () => sigHandler(this.inSnapShot, this.sub, this.db),
+    );
   }
 
   // Get the latest sequence number
@@ -152,22 +148,45 @@ export class Nqlite {
     return res;
   }
 
+  // Setup reconnect listener
+  async ncListener(): Promise<void> {
+    for await (const s of this.nc.status()) {
+      console.log(`[NATS]: ${s.type} -> ${s.data}`);
+    }
+  }
+
   // Setup ephemeral consumer
   async consumer(): Promise<void> {
     // Get the latest sequence number
     const seq = this.getSeq() + 1;
 
+    console.log("Attempt start sequence  ->", seq);
+
     const opts = consumerOpts().manualAck().ackExplicit().maxAckPending(10)
-      .deliverTo(createInbox()).startSequence(seq).idleHeartbeat(500);
+      .deliverTo(createInbox()).startSequence(seq).idleHeartbeat(10000);
 
-    // Get the latest sequence number in the stream
-    const s = await this.jsm.streams.info(this.app);
+    // Get the latest sequence number in the stream and subscribe if possible
+    try {
+      const s = await this.jsm.streams.info(this.app);
 
-    console.log("Starting sequence       ->>", seq);
-    console.log("Last sequence in stream ->>", s.state.last_seq);
+      // If s.state.last_seq is greater than seq + snapThreshold we are too far behind and we need to die
+      if (s.state.last_seq > seq + this.snapThreshold) {
+        console.log(
+          `Too far behind to catch up: ${s.state.last_seq} > ${seq} + ${this.snapThreshold}`,
+        );
+        Deno.exit(1);
+      }
 
-    this.sub = await this.js.subscribe(this.subject, opts);
-    this.iterator(this.sub, s.state.last_seq);
+      console.log("Catching up to last seq ->", s.state.last_seq);
+
+      this.sub = await this.js.subscribe(this.subject, opts);
+      this.iterator(this.sub, s.state.last_seq);
+    } catch (e) {
+      console.log("Error getting stream info/subscribing", e.message);
+      // Add a small backoff
+      await new Promise((resolve) => setTimeout(resolve, 1000));
+      return this.consumer();
+    }
   }
 
   // Publish a message to NATS
@@ -218,7 +237,7 @@ export class Nqlite {
 
         // Check for last sequence
         if (lastSeq && m.seq === lastSeq) {
-          console.log("Caught up to last msg   ->>", lastSeq);
+          console.log("Caught up to last seq   ->", lastSeq);
         }
       }
     } catch (e) {

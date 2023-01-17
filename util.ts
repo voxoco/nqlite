@@ -1,6 +1,7 @@
 import {
   connect,
   credsAuthenticator,
+  JetStreamSubscription,
   ObjectStore,
   StreamInfo,
   StringCodec,
@@ -13,11 +14,7 @@ import { NatsConf, NatsInit, NatsRes } from "./types.ts";
 export async function setupNats(conf: NatsInit): Promise<NatsRes> {
   const { app, creds, token, url } = conf;
 
-  const natsOpts: NatsConf = {
-    servers: url,
-    maxReconnectAttempts: -1,
-    waitOnFirstConnect: true,
-  };
+  const natsOpts: NatsConf = { servers: url, maxReconnectAttempts: -1 };
   if (token) natsOpts.token = token;
   if (creds) {
     natsOpts.authenticator = credsAuthenticator(Deno.readFileSync(creds));
@@ -64,7 +61,7 @@ export async function setupNats(conf: NatsInit): Promise<NatsRes> {
 
   console.log("NATS initialized");
 
-  return { sc, js, os, jsm };
+  return { nc, sc, js, os, jsm };
 }
 
 export async function bootstrapDataDir(dataDir: string) {
@@ -209,7 +206,7 @@ export async function snapshotCheck(
     // Check if we need to snapshot
     if (snapInfo) {
       const processed = seq - Number(snapInfo.description);
-      console.log("Messages processed since last snapshot ->>", processed);
+      console.log("Messages processed since last snapshot ->", processed);
       if (processed < threshold) {
         console.log(
           `Skipping snapshot, threshold not met: ${processed} < ${threshold}`,
@@ -240,4 +237,23 @@ export async function snapshotCheck(
   }
 
   return true;
+}
+
+export async function sigHandler(
+  inSnap: boolean,
+  sub: JetStreamSubscription,
+  db: Database,
+): Promise<void> {
+  // Check if inSnapShot is true
+  if (inSnap) {
+    console.log("SIGINT received while in snapshot. Waiting 10 seconds...");
+    await new Promise((resolve) => setTimeout(resolve, 10000));
+  }
+
+  console.log("About to die! Draining subscription...");
+  await sub.drain();
+  await sub.destroy();
+  console.log("Closing the database");
+  db.close();
+  Deno.exit();
 }
