@@ -307,6 +307,11 @@ export class Nqlite {
   http() {
     const api = new Hono();
 
+    // GET /health
+    api.get("/health", (c: Context): Response => {
+      return c.json({ status: "ok" });
+    });
+
     // GET /db/query
     api.get("/db/query", (c: Context): Response => {
       const res: Res = { results: [{}], time: 0 };
