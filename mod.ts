@@ -257,6 +257,9 @@ export class Nqlite {
         setTimeout(resolve, this.snapInterval * 60 * 60 * 1000)
       );
 
+      // Now wait for a random amount of time between 1 and 5 minutes
+      await new Promise((resolve) => setTimeout(resolve, Math.random() * 5 * 60 * 1000));
+
       this.inSnapShot = true;
 
       try {
