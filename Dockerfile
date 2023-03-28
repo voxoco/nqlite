@@ -4,8 +4,8 @@ EXPOSE 4001
 
 WORKDIR /app
 
-COPY import_map.json .
-RUN deno cache import_map.json
+COPY deno.json .
+RUN deno cache deno.json
 
 ADD . .
 
