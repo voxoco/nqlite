@@ -170,13 +170,13 @@ export class Nqlite {
       const s = await this.jsm.streams.info(this.app);
 
       // If s.state.last_seq is greater than seq + snapThreshold * 2 we are too far behind and we need to die
-      const snapDouble = this.snapThreshold * 2;
-      if (s.state.last_seq > seq + snapDouble) {
-        console.log(
-          `Too far behind to catch up: ${s.state.last_seq} > ${seq} + ${snapDouble}`,
-        );
-        Deno.exit(1);
-      }
+      // const snapDouble = this.snapThreshold * 2;
+      // if (s.state.last_seq > seq + snapDouble) {
+      //   console.log(
+      //     `Too far behind to catch up: ${s.state.last_seq} > ${seq} + ${snapDouble}`,
+      //   );
+      //   Deno.exit(1);
+      // }
 
       console.log("Catching up to last seq ->", s.state.last_seq);
 
