@@ -4,9 +4,6 @@ EXPOSE 4001
 
 WORKDIR /app
 
-COPY deno.json .
-RUN deno cache deno.json
-
 ADD . .
 
 RUN deno cache main.ts

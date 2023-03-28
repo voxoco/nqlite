@@ -37,19 +37,14 @@ export async function setupNats(conf: NatsInit): Promise<NatsRes> {
 
   // Create stream if it doesn't exist
   if (!stream) {
-    const streamObj = {
-      name: app,
-      subjects: [`${app}.*`],
-      num_replicas: 3,
-    };
-
     console.log("Creating stream");
+    stream = await jsm.streams.add({ name: app, subjects: [`${app}.*`] });
+
+    // Try to update the stream to 3 replicas
     try {
-      stream = await jsm.streams.add(streamObj);
+      await jsm.streams.update(app, { num_replicas: 3 });
     } catch (e) {
-      streamObj.num_replicas = 1;
-      stream = await jsm.streams.add(streamObj);
-      console.log(e);
+      console.log("Could not update stream to 3 replicas:", e.message);
     }
   }
 
@@ -57,7 +52,14 @@ export async function setupNats(conf: NatsInit): Promise<NatsRes> {
   const js = nc.jetstream();
 
   console.log("Creating object store if it don't exist");
-  const os = await js.views.os(app, { replicas: 3 });
+  const os = await js.views.os(app);
+
+  // Try to update the object store to 3 replicas
+  try {
+    await jsm.streams.update(`OBJ_${app}`, { num_replicas: 3 });
+  } catch (e) {
+    console.log("Could not update object store to 3 replicas:", e.message);
+  }
 
   console.log("NATS initialized");
 
