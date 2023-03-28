@@ -1,9 +1,0 @@
-{
-  "imports": {
-    "sqlite3": "https://deno.land/x/sqlite3@0.6.1/mod.ts",
-    "natsws": "https://deno.land/x/natsws@v1.11.3/src/mod.ts",
-    "nats": "https://deno.land/x/nats@v1.10.3/src/mod.ts",
-    "serve": "https://deno.land/std@0.170.0/http/server.ts",
-    "hono": "https://deno.land/x/hono@v2.6.2/mod.ts"
-  }
-}

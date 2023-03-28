@@ -57,7 +57,7 @@ export async function setupNats(conf: NatsInit): Promise<NatsRes> {
   const js = nc.jetstream();
 
   console.log("Creating object store if it don't exist");
-  const os = await js.views.os(app);
+  const os = await js.views.os(app, { replicas: 3 });
 
   console.log("NATS initialized");
 
@@ -161,20 +161,12 @@ export async function snapshot(
   db: string,
   seq: number,
 ): Promise<boolean> {
-  // Make a copy of the sqlite file
-  try {
-    await Deno.copyFile(db, `${db}.bak`);
-  } catch (e) {
-    console.log("Error during snapshot copy file:", e.message);
-    return false;
-  }
-
   try {
     // Put the sqlite file in the object store
     const info = await os.put({
       name: "snapshot",
       description: `${seq}`,
-    }, readableStreamFrom(await Deno.readFile(`${db}.bak`)));
+    }, readableStreamFrom(await Deno.readFile(db)));
 
     // Convert bytes to megabytes
     const mb = (info.size / 1024 / 1024).toFixed(2);

@@ -212,7 +212,7 @@ export class Nqlite {
   }
 
   // Handle NATS push consumer messages
-  async iterator(sub: JetStreamSubscription, lastSeq?: number) {
+  async iterator(sub: JetStreamSubscription, lastSeq: number) {
     try {
       for await (const m of sub) {
         const data = JSON.parse(this.sc.decode(m.data));
