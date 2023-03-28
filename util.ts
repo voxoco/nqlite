@@ -37,19 +37,14 @@ export async function setupNats(conf: NatsInit): Promise<NatsRes> {
 
   // Create stream if it doesn't exist
   if (!stream) {
-    const streamObj = {
-      name: app,
-      subjects: [`${app}.*`],
-      num_replicas: 3,
-    };
-
     console.log("Creating stream");
+    stream = await jsm.streams.add({ name: app, subjects: [`${app}.*`] });
+
+    // Try to update the stream to 3 replicas
     try {
-      stream = await jsm.streams.add(streamObj);
+      await jsm.streams.update(app, { num_replicas: 3 });
     } catch (e) {
-      streamObj.num_replicas = 1;
-      stream = await jsm.streams.add(streamObj);
-      console.log(e);
+      console.log("Could not update stream to 3 replicas:", e.message);
     }
   }
 
@@ -58,6 +53,13 @@ export async function setupNats(conf: NatsInit): Promise<NatsRes> {
 
   console.log("Creating object store if it don't exist");
   const os = await js.views.os(app);
+
+  // Try to update the object store to 3 replicas
+  try {
+    await jsm.streams.update(`OBJ_${app}`, { num_replicas: 3 });
+  } catch (e) {
+    console.log("Could not update object store to 3 replicas:", e.message);
+  }
 
   console.log("NATS initialized");
 
@@ -161,20 +163,12 @@ export async function snapshot(
   db: string,
   seq: number,
 ): Promise<boolean> {
-  // Make a copy of the sqlite file
-  try {
-    await Deno.copyFile(db, `${db}.bak`);
-  } catch (e) {
-    console.log("Error during snapshot copy file:", e.message);
-    return false;
-  }
-
   try {
     // Put the sqlite file in the object store
     const info = await os.put({
       name: "snapshot",
       description: `${seq}`,
-    }, readableStreamFrom(await Deno.readFile(`${db}.bak`)));
+    }, readableStreamFrom(await Deno.readFile(db)));
 
     // Convert bytes to megabytes
     const mb = (info.size / 1024 / 1024).toFixed(2);

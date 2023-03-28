@@ -52,7 +52,7 @@ The quickest way to get up and running is to download the binary from the
 [Releases](https://github.com/voxoco/nqlite/releases) page and run it like so:
 
 ```bash
-$ nqlite --wshost=wss://FQDN --creds=./nats.creds
+$ nqlite --nats-host=wss://FQDN --creds=./nats.creds
 ```
 
 ### Command line options
@@ -73,7 +73,7 @@ nqlite [options]
 ### Docker
 
 ```bash
-docker run voxo/nqlite -p 4001:4001 --wshost=wss://FQDN --creds=./nats.creds
+docker run voxo/nqlite -p 4001:4001 --nats-host=wss://FQDN --creds=./nats.creds
 ```
 
 The Docker image is available on
@@ -83,13 +83,13 @@ The Docker image is available on
 
 ```bash
 $ brew install voxoco/apps/nqlite
-$ nqlite --wshost=wss://FQDN --token=secret
+$ nqlite --nats-host=wss://FQDN --token=secret
 ```
 
 ### Deno
 
 ```bash
-$ deno run -A --unstable https://deno.land/x/nqlite/main.ts --wshost=wss://FQDN --creds=./nats.creds
+$ deno run -A --unstable https://deno.land/x/nqlite/main.ts --nats-host=wss://FQDN --creds=./nats.creds
 ```
 
 ## Dependencies

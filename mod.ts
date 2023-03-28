@@ -170,13 +170,13 @@ export class Nqlite {
       const s = await this.jsm.streams.info(this.app);
 
       // If s.state.last_seq is greater than seq + snapThreshold * 2 we are too far behind and we need to die
-      const snapDouble = this.snapThreshold * 2;
-      if (s.state.last_seq > seq + snapDouble) {
-        console.log(
-          `Too far behind to catch up: ${s.state.last_seq} > ${seq} + ${snapDouble}`,
-        );
-        Deno.exit(1);
-      }
+      // const snapDouble = this.snapThreshold * 2;
+      // if (s.state.last_seq > seq + snapDouble) {
+      //   console.log(
+      //     `Too far behind to catch up: ${s.state.last_seq} > ${seq} + ${snapDouble}`,
+      //   );
+      //   Deno.exit(1);
+      // }
 
       console.log("Catching up to last seq ->", s.state.last_seq);
 
@@ -212,7 +212,7 @@ export class Nqlite {
   }
 
   // Handle NATS push consumer messages
-  async iterator(sub: JetStreamSubscription, lastSeq?: number) {
+  async iterator(sub: JetStreamSubscription, lastSeq: number) {
     try {
       for await (const m of sub) {
         const data = JSON.parse(this.sc.decode(m.data));
@@ -258,7 +258,9 @@ export class Nqlite {
       );
 
       // Now wait for a random amount of time between 1 and 5 minutes
-      await new Promise((resolve) => setTimeout(resolve, Math.random() * 5 * 60 * 1000));
+      await new Promise((resolve) =>
+        setTimeout(resolve, Math.random() * 5 * 60 * 1000)
+      );
 
       this.inSnapShot = true;
 

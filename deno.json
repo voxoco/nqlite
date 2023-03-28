@@ -5,5 +5,11 @@
     "build_mac": "deno compile --target=aarch64-apple-darwin --output nqlite_mac -A --unstable main.ts",
     "build_windows": "deno compile --target=x86_64-pc-windows-msvc --output nqlite_windows -A --unstable main.ts"
   },
-  "importMap": "./import_map.json"
+  "imports": {
+    "sqlite3": "https://deno.land/x/sqlite3@0.8.1/mod.ts",
+    "natsws": "https://deno.land/x/natsws@v1.14.0/src/mod.ts",
+    "nats": "https://deno.land/x/nats@v1.13.0/src/mod.ts",
+    "serve": "https://deno.land/std@0.181.0/http/server.ts",
+    "hono": "https://deno.land/x/hono@v2.7.8/mod.ts"
+  }
 }
