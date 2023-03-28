@@ -14,6 +14,8 @@ import { serve } from "serve";
 import { Context, Hono } from "hono";
 import {
   bootstrapDataDir,
+  httpBackup,
+  httpRestore,
   restore,
   setupDb,
   setupNats,
@@ -40,6 +42,8 @@ export class Nqlite {
   snapThreshold: number;
   jsm!: JetStreamManager;
   inSnapShot: boolean;
+  externalBackup!: string;
+  externalBackupUrl!: string;
 
   // Create a constructor
   constructor() {
@@ -52,10 +56,13 @@ export class Nqlite {
 
   // Init function to connect to NATS
   async init(opts: Options): Promise<void> {
-    const { url, creds, token, dataDir } = opts;
+    const { url, creds, token, dataDir, externalBackup, externalBackupUrl } =
+      opts;
 
     this.dataDir = `${dataDir}/${this.app}`;
     this.dbFile = `${this.dataDir}/nqlite.db`;
+    this.externalBackup = externalBackup;
+    this.externalBackupUrl = externalBackupUrl;
 
     // Bootstrap the dataDir
     await bootstrapDataDir(this.dataDir);
@@ -65,7 +72,13 @@ export class Nqlite {
     ({ nc: this.nc, js: this.js, os: this.os, jsm: this.jsm } = res);
 
     // Restore from snapshot if exists
-    await restore(this.os, this.dbFile);
+    const restoreRes = await restore(this.os, this.dbFile);
+    if (!restoreRes) {
+      // Restore from external backup
+      if (externalBackup === "http") {
+        await httpRestore(this.dbFile, externalBackupUrl);
+      }
+    }
 
     // Setup to the database
     this.db = setupDb(this.dbFile);
@@ -285,15 +298,20 @@ export class Nqlite {
           continue;
         }
 
-        // Snapshot the database to object store
+        // Snapshot the database to object store and/or external storage
         let seq = this.getSeq();
-        if (await snapshot(this.os, this.dbFile, seq)) {
-          // Purge previos messages from the stream older than seq - snapThreshold
+        if (await snapshot(this.os, this.dbFile)) {
+          // Purge previous messages from the stream older than seq - snapThreshold
           seq = seq - this.snapThreshold;
           await this.jsm.streams.purge(this.app, {
             filter: this.subject,
             seq: seq < 0 ? 0 : seq,
           });
+        }
+
+        // Attempting to backup the database to external storage
+        if (this.externalBackup === "http") {
+          await httpBackup(this.dbFile, this.externalBackupUrl);
         }
       } catch (e) {
         console.log("Error during snapshot polling:", e.message);

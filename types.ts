@@ -58,4 +58,6 @@ export type Options = {
   creds: string;
   token: string;
   dataDir: string;
+  externalBackup: string;
+  externalBackupUrl: string;
 };

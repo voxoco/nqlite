@@ -2,7 +2,14 @@ import { parse } from "https://deno.land/std@0.168.0/flags/mod.ts";
 
 const flags = parse(Deno.args, {
   boolean: ["help"],
-  string: ["nats-host", "creds", "token", "data-dir"],
+  string: [
+    "nats-host",
+    "creds",
+    "token",
+    "data-dir",
+    "external-backup",
+    "external-backup-url",
+  ],
   alias: { h: "help" },
   stopEarly: true,
   default: {
@@ -11,6 +18,8 @@ const flags = parse(Deno.args, {
     creds: "",
     token: "",
     "data-dir": ".nqlite-data",
+    "external-backup": "",
+    "external-backup-url": "",
   },
 });
 
@@ -26,7 +35,13 @@ const showHelp = () => {
   console.log(
     "    --creds: NATS credentials file (required if --token is not provided)",
   );
-  console.log("    --data-dir: Data directory (default: '.data'");
+  console.log("    --data-dir: Data directory (default: '.nqlite-data/')");
+  console.log(
+    "    --external-backup: External backup/restore method (option: 'http')",
+  );
+  console.log(
+    "    --external-backup-url: The HTTP url for backup/restore (only required if --external-backup is provided)",
+  );
   Deno.exit(0);
 };
 
@@ -53,6 +68,18 @@ if (!flags["nats-host"]) {
   showHelp();
 }
 
+// Check if external backup is provided, and if so, make sure the url is provided
+if (flags["external-backup"] && !flags["external-backup-url"]) {
+  console.log("Error: --external-backup-url is required");
+  showHelp();
+}
+
+// Make sure only allowed external backup methods are provided
+if (flags["external-backup"] && flags["external-backup"] !== "http") {
+  console.log("Error: --external-backup only supports 'http'");
+  showHelp();
+}
+
 import { Nqlite, Options } from "./mod.ts";
 
 // Startup nqlite
@@ -63,6 +90,8 @@ const opts: Options = {
   creds: flags["creds"],
   token: flags["token"],
   dataDir: flags["data-dir"],
+  externalBackup: flags["external-backup"],
+  externalBackupUrl: flags["external-backup-url"],
 };
 
 await nqlite.init(opts);
