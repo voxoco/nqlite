@@ -66,6 +66,10 @@ nqlite [options]
     --token=secret # NATS auth token - required if --creds not provided
 
     --data-dir=/nqlite-data # Data directory - optional (default: ./nqlite-data)
+
+    --external-backup=http # External backup/restore method (option: 'http')
+
+    --external-backup-url=http://someBlockStorage/backup/nqlite.db # External backup/restore URL
   
     --h - Help
 ```
