@@ -107,17 +107,17 @@ export function setupDb(file: string): Database {
   return db;
 }
 
-export async function restore(os: ObjectStore, db: string): Promise<void> {
+export async function restore(os: ObjectStore, db: string): Promise<boolean> {
   // See if snapshot exists in object store
   const o = await os.get("snapshot");
 
   if (!o) {
     console.log("No snapshot object to restore");
-    return;
+    return false;
   }
 
   console.log(
-    `Restoring from snapshot with seq ${o.info.description} taken: ${o.info.mtime}`,
+    `Restoring from snapshot taken: ${o.info.mtime}`,
   );
 
   // Get the object
@@ -127,6 +127,7 @@ export async function restore(os: ObjectStore, db: string): Promise<void> {
   const mb = (o.info.size / 1024 / 1024).toFixed(2);
 
   console.log(`Restored from snapshot: ${mb}Mb`);
+  return true;
 }
 
 async function fromReadableStream(
@@ -161,20 +162,19 @@ function readableStreamFrom(data: Uint8Array): ReadableStream<Uint8Array> {
 export async function snapshot(
   os: ObjectStore,
   db: string,
-  seq: number,
 ): Promise<boolean> {
   try {
     // Put the sqlite file in the object store
-    const info = await os.put({
-      name: "snapshot",
-      description: `${seq}`,
-    }, readableStreamFrom(await Deno.readFile(db)));
+    const info = await os.put(
+      { name: "snapshot" },
+      readableStreamFrom(Deno.readFileSync(db)),
+    );
 
     // Convert bytes to megabytes
     const mb = (info.size / 1024 / 1024).toFixed(2);
 
     console.log(
-      `Snapshot with sequence number ${seq} stored in object store: ${mb}Mb`,
+      `Snapshot stored in object store: ${mb}Mb`,
     );
     return true;
   } catch (e) {
@@ -231,6 +231,41 @@ export async function snapshotCheck(
   }
 
   return true;
+}
+
+export async function httpBackup(db: string, url: string): Promise<boolean> {
+  // Backup to HTTP using the fetch API
+  try {
+    const res = await fetch(url, {
+      method: "POST",
+      body: Deno.readFileSync(db),
+    });
+    console.log("HTTP backup response:", res.status, res.statusText);
+    if (res.status !== 200) return false;
+    const mb = (Deno.statSync(db).size / 1024 / 1024).toFixed(2);
+    console.log(`Snapshot stored via http: ${mb}Mb`);
+    return true;
+  } catch (e) {
+    console.log("Error during http backup:", e.message);
+    return false;
+  }
+}
+
+export async function httpRestore(db: string, url: string): Promise<boolean> {
+  // Restore from HTTP using the fetch API
+  try {
+    const res = await fetch(url);
+    console.log("HTTP restore response:", res.status, res.statusText);
+    if (res.status !== 200) return false;
+    const file = await Deno.open(db, { write: true, create: true });
+    await res.body?.pipeTo(file.writable);
+    const mb = (Deno.statSync(db).size / 1024 / 1024).toFixed(2);
+    console.log(`Restored from http snapshot: ${mb}Mb`);
+    return true;
+  } catch (e) {
+    console.log("Error during http restore:", e.message);
+    return false;
+  }
 }
 
 export async function sigHandler(
